@@ -8,7 +8,7 @@ import utils
 import argparse
 import logging
 
-logo = """
+logo = r"""
         ______    _     _
         |  ___|  (_)   | |
         | |_ _ __ _  __| |_   _ _ __ ___  _ __
@@ -27,8 +27,10 @@ def MENU():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent(""))
 
-    parser.add_argument('process',
-                        help='the process that you will be injecting to')
+    parser.add_argument('process', nargs='?',
+                        help='the process/app to inject into (omit when using -l/--list)')
+    parser.add_argument('-l', '--list', action='store_true',
+                        help='list applications on the device and exit')
     parser.add_argument('-o', '--out', type=str, metavar="dir",
                         help='provide full output directory path. (def: \'dump\')')
     parser.add_argument('-U', '--usb', action='store_true',
@@ -45,9 +47,42 @@ def MENU():
     return args
 
 
+def list_applications(usb):
+    try:
+        device = frida.get_usb_device() if usb else frida.get_local_device()
+    except Exception as e:
+        print("Can't connect to the device. Is it connected and unlocked?")
+        logging.debug(str(e))
+        sys.exit(1)
+    try:
+        apps = device.enumerate_applications()
+    except Exception as e:
+        print("Could not enumerate applications: " + str(e))
+        sys.exit(1)
+    # running apps (pid != 0) first, then alphabetical by name
+    apps = sorted(apps, key=lambda a: (a.pid == 0, (a.name or "").lower()))
+    print("\n{:<8} {:<34} {}".format("PID", "Name", "Identifier"))
+    print("-" * 78)
+    for app in apps:
+        pid = str(app.pid) if app.pid else "-"
+        name = (app.name or "")[:34]
+        print("{:<8} {:<34} {}".format(pid, name, app.identifier))
+    print("")
+
+
 print(logo)
 
 arguments = MENU()
+
+# Handle --list: enumerate apps and exit before attaching to anything
+if arguments.list:
+    list_applications(arguments.usb)
+    sys.exit(0)
+
+# A process is required for an actual dump
+if arguments.process is None:
+    print("error: a process/app name is required for dumping (or use -l to list apps)")
+    sys.exit(1)
 
 # Define Configurations
 APP_NAME = arguments.process
@@ -101,7 +136,7 @@ mem_access_viol = ""
 print("Starting Memory dump...")
 
 script = session.create_script(
-    """'use strict';
+    r"""'use strict';
 
     rpc.exports = {
       enumerateRanges: function (prot) {
@@ -112,7 +147,7 @@ script = session.create_script(
       }
     };
 
-    """)
+    r""")
 script.on("message", utils.on_message)
 script.load()
 
